@@ -1,0 +1,241 @@
+***********************
+* Variable generation *
+***********************
+ 
+gen lnTV =ln(tv)
+gen lnRadio =ln(radio)
+gen lnPrint =ln(print)
+gen lnSales=ln(sales)
+
+
+*generate translog variables
+gen lnTV2 =0.5*lnTV^2	
+gen lnRadio2 =0.5*lnRadio^2	
+gen lnPrint2 =0.5*lnPrint^2	
+
+gen lnTVRad =lnTV*lnRadio
+gen lnTVPr =lnTV*lnPrint
+gen lnRadPr = lnRadio*lnPrint
+
+summ  lnSales lnTV lnRadio lnPrint
+
+corr lnSales lnTV lnRadio lnPrint
+graph box lnTV lnRadio lnPrint lnSales
+
+
+*******************************
+* Revenue/Production function *
+*******************************
+
+*although the dependent variable is Sales (revenue), this should be interpreted as a production function in the sense that we
+*utilise advertising time (input) to generate sales (output)
+
+reg lnSales lnTV lnRadio lnPrint
+
+estat hettest
+estat imtest, white
+estat ovtest
+estat ovtest, rhs
+vif
+
+avplots
+
+*passes all diagnostics, no intial evidence of any significant outliers
+
+reg lnSales lnTV lnRadio lnPrint lnTV2 lnRadio2 lnPrint2 lnTVRad lnTVPr lnRadPr 
+
+*all variables insignificant, expected in a model with 9 variables and just 60 obs
+*model reduction with g-to-s
+
+reg lnSales lnTV lnRadPr  
+
+*reduced form
+
+estat hettest
+estat imtest, white
+estat ovtest
+vif
+avplots
+
+*passes all diagnostics, no immediate evidence of outliers
+*still, model is not much of an improvement over the Cobb-Douglas, given that no second-order effects are included in the  
+*reduced form and Radio and Print advertising are only represented as an interaction term (problematic as both variables are
+*statistically significant in the Cobb-Douglas model) 
+*as such, the Cobb-Douglas model should be the preffered specification
+
+********************************
+* Assessing the expert opinion *
+********************************
+
+reg lnSales lnTV lnRadio lnPrint 
+
+
+*two points need to be examined: the relative weight of the three inputs and the issue of returns to scale
+*the relative weight of the three advertising channels can be readily assessed by the elasticities of output from a log-log model
+*(such as Cobb-Douglas or translog), assuming that the all independend variables have similar means and standard deviations
+*to improve comparability, we could also normalise the independend variables (by substracting their mean and dividing by their standard deviation)
+*the coefficients of the regression model using normalised variables are reffered to as beta coefficients
+*Stata can easily compute those by using the 'beta' option in reg
+
+reg lnSales lnTV lnRadio lnPrint, beta
+
+*since we are using a Cobb-Douglas model, the elasticities of output correspond to the coefficients of the independend variables
+
+test lnTV=lnRadio
+
+test lnPrint=lnRadio
+
+*the model shows that the TV beta elasticity is 0.9, while the Radio beta elasticity is 0.11 and the difference is statistically significant
+*in other words TV advertising has approximately 8 times the weight of Radio advertising in explaining sales
+
+*the model also shows that the Print beta elasticity is also 0.11 and is statistically indistinguishable from the Radio beta elasticity
+*in other words, Print and Radio have the same relative weight, according to this model 
+
+*the second points relates to the issue of returns to scale
+*the expert is of the view that the brands face variable returns to advertising
+*the Cobb-Douglas model can only produce a global estimate of scale elasticity
+*therefore, we cannot assess whether differnt brands face different scale elasticities
+*however we can examine whether the sample as a whole demonstrates constant, increasing of decreasing returns to scale
+
+test lnTV+lnPrint+lnRadio=1
+
+*the scale elasticity estimate from the Cobb-Douglas model is appr. 1.1, suggesting increasing returns to scale
+*however we cannot reject the hypothesis of constant returns to scale
+
+*****************
+* COLS and MOLS *
+*****************
+
+reg lnSales lnTV lnRadio lnPrint 
+
+*extract the residuals
+predict res, r
+
+*COLS
+
+*calculate the estimate of E(u)
+egen maxres=max(res)
+sum maxres
+
+*calculate inefficiency
+gen lnE_cols= maxres-res
+
+*calculate technical efficiency
+gen TE_cols= exp(-lnE_cols)
+sum TE_cols, detail
+
+twoway (hist TE_cols)
+
+*MOLS
+
+reg lnSales lnTV lnRadio lnPrint 
+
+*extract MSE
+gen rmse=e(rmse)
+
+*calculate the estimate of E(u) assuming exponentially distributed efficiency
+gen eu_exp = rmse
+
+*calculate the estimate of E(u) assuming half-normally distributed efficiency
+gen eu_hn = rmse*((2/_pi))^(1/2)
+
+*calculate inefficiency (exponential)
+gen lnE_mols_exp = eu_exp - res 
+
+*calculate inefficiency (half-normal)
+gen lnE_mols_hn = eu_hn - res 
+
+*calculate technical efficiency
+gen TE_mols_exp = exp(-lnE_mols_exp)
+
+gen TE_mols_hn = exp(-lnE_mols_hn)
+
+sum  TE_mols_hn TE_mols_exp, detail
+
+twoway (hist TE_mols_hn, fcolor(teal)) (hist TE_mols_exp)
+
+*correct the efficiency scores of the units with score of over 100%
+replace TE_mols_hn=1 if TE_mols_hn>1
+replace TE_mols_exp=1 if TE_mols_exp>1
+
+sum TE_mols_hn TE_mols_exp TE_cols
+
+*there is no robust way of choosing between the three deterministic approaches - I would generally recommend leaning towards
+*MOLS, since this produces the highest efficieny estimates
+*MOLS is almost always more appropriate when the coefficient of detrmination is relatively low (less than 60%) 
+
+*******
+* SFA *
+*******
+
+reg lnSales lnTV lnRadio lnPrint
+
+*test for the skewness of the OLS residuals
+kdensity res, normal
+sum res, detail
+sktest res
+
+*negative skew, but not statistically significant (but marginally so)
+*this might cause complications with the SFA model
+
+*half-normal model
+
+frontier  lnSales lnTV lnRadio lnPrint, d(h)
+
+*the likelihood ratio test rejects the null hypothesis of no inefficiency, but just barely so!
+*model suggests that the standard deviation of the noise component is appr. 0.14 (modest/high noise levels)
+*while the standard deviation of the inefficincy component is appr. twice as much (0.30)
+*overall, this is a good case study for when SFA is most useful - high levels of noise but also high levels of inefficiency
+
+predict lnE_sfa_JMLS_hn, u
+predict TE_sfa_BC_hn, te
+gen TE_sfa_JMLS_hn=exp(-lnE_sfa_JMLS_hn)
+
+sum  TE_sfa_JMLS_hn TE_sfa_BC_hn, detail
+
+*both estimators give almost identintical efficiency estimates, so we use the most common in the literature, namely BC 
+
+frontier  lnSales lnTV lnRadio lnPrint, d(e)
+
+*very similar results to the half-normal model, except that lambda is now closer to one
+*ie, similar strength of noise and inefficiency in our data
+
+predict lnE_sfa_JMLS_e, u
+predict TE_sfa_BC_e, te
+gen TE_sfa_JMLS_e=exp(-lnE_sfa_JMLS_e)
+
+sum  TE_sfa_JMLS_e TE_sfa_BC_e, detail
+
+*both estimators give almost identintical efficiency estimates, so we use the most common in the literature, namely BC 
+
+*which distributional assumption do we recommend? 
+
+sum  TE_sfa_BC_hn TE_sfa_BC_e, detail
+corr TE_sfa_BC_hn TE_sfa_BC_e
+spearman TE_sfa_BC_hn TE_sfa_BC_e
+
+*efficiency scores from both distributional assumptions are very similar - exponential distribution produces slightly higher  
+*efficiency scores, which is expected given that the estimated sigma_u was lower relative to the half-normal model 
+
+*check the distribution of efficiencies
+twoway (scatter TE_sfa_BC_e TE_sfa_BC_hn)
+twoway (kdensity TE_sfa_BC_e) (kdensity TE_sfa_BC_hn)
+twoway (hist TE_sfa_BC_hn, fcolor(teal)) (hist TE_sfa_BC_e)
+
+*scatter graph cleraly shows the very high correlation of the efficiency estimates 
+*the kernel density graph shows the distributional differences - half-normal inefficiency is more evenly spread out across
+*the units, while the exponential model shows a higher proportion of units with relatively lower inefficiency scores
+
+*overall, it is very difficult to chose between the two specifications - I would go with the exponential model, simply because
+*it procuces more cautious estimates of inefficiency, but a strong arguement could also be made for the half-noemal model,
+*especially if I had external evidence that suggests widespread inefficient spent on advertising 
+
+sum TE_sfa_BC_e TE_mols_exp
+corr TE_sfa_BC_e TE_mols_exp
+twoway (kdensity TE_sfa_BC_e) (kdensity TE_mols_exp)
+*when also considering the deterministic approaches, the model of choice should be the SFA one
+*correct skew of the residuals (although barely not statistically significant), likelyhood test reject hypothesis of no
+*inefficiency and a sample size that is above my minimum threshold (50 obs), although more observations would be welcome
+*regardless, the results from both these models (MOLS_exp and SFA_exp) are very close and very highly correlated.
+ 
+
